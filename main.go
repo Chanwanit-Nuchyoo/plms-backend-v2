@@ -28,6 +28,7 @@ func main() {
 	app.Get("/api*", swagger.HandlerDefault)
 
 	routes.UserRoutes(app)
+	routes.CodeRoutes(app)
 
 	app.Listen(os.Getenv("PORT"))
 }
