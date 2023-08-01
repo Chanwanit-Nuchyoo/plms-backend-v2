@@ -13,8 +13,17 @@ import (
 
 // Params struct holds the incoming request parameters
 type Params struct {
-	TimeLimit int    `form:"time_limit"`
-	Params    string `form:"params"`
+	TimeLimit   int    `form:"time_limit"`
+	Params      string `form:"params"`
+	ExcerciseId int    `form:"execercise_id"`
+}
+type TestCasePayLoad struct {
+	TimeLimit   int `form:"time_limit"`
+	ExcerciseId int `form:"execercise_id"`
+}
+type AddTestData struct {
+	inputs string
+	result string
 }
 
 // PythonProcessPool represents a pool of Python processes.
@@ -23,6 +32,15 @@ type PythonProcessPool struct {
 	pool   []*exec.Cmd
 	maxCap int
 }
+
+type Result struct {
+	Match    bool
+	Output   string
+	Expected string
+}
+
+var output []byte
+var resultList []Result
 
 // NewPythonProcessPool creates a new Python process pool with a specified maximum capacity.
 func NewPythonProcessPool(maxCap int) *PythonProcessPool {
@@ -142,4 +160,79 @@ func ExecuteCode(c *fiber.Ctx) error {
 	}
 
 	return c.SendString(string(output))
+}
+
+func RunCodeWithTestCase(c *fiber.Ctx) error {
+	params := new(TestCasePayLoad)
+	if err := c.BodyParser(params); err != nil {
+		fmt.Println("err: ", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Failed to parse request body",
+		})
+	}
+
+	// Retrieve the user's Python code from the request
+	userCode := c.FormValue("python_code")
+	if userCode == "" {
+		file, err := c.FormFile("python_file")
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "No Python code or .py file provided",
+			})
+		}
+
+		pyFile, err := file.Open()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("Failed to open Python file: %s", err.Error()),
+			})
+		}
+		defer pyFile.Close()
+
+		pyCodeBytes, err := io.ReadAll(pyFile)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("Failed to read Python file: %s", err.Error()),
+			})
+		}
+		userCode = string(pyCodeBytes)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(params.TimeLimit)*time.Second)
+	defer cancel()
+
+	testData := []AddTestData{
+		{"1 2 3 4 5 ",
+			" *** Sum even / Subtract odd ***\r\nEnter numbers : 1 2 3 4 5 \r\nSum is -3\r\n"},
+		{"4 6 3 5 8 ",
+			" *** Sum even / Subtract odd ***\r\nEnter numbers : 4 6 3 5 8 \r\nSum is 10\r\n"},
+		{"0 0 1 1 2 ",
+			" *** Sum even / Subtract odd ***\r\nEnter numbers : 0 0 1 1 2 \r\nSum is 0\r\n"},
+	}
+
+	var resultList []Result // Declare resultList as a local variable
+
+	for _, datum := range testData {
+		output, err := runScript(ctx, userCode, datum.inputs) // Declare output as a local variable
+		result := Result{
+			Match:    string(output) == datum.result,
+			Output:   string(output),
+			Expected: datum.result,
+		}
+		resultList = append(resultList, result)
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Println("err: ", err)
+			return c.Status(fiber.StatusRequestTimeout).JSON(fiber.Map{
+				"error": "Python script execution timed out",
+			})
+		} else if err != nil {
+			fmt.Println("err: ", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("Failed to execute Python script: %s", err.Error()),
+			})
+		}
+	}
+	return c.JSON(fiber.Map{
+		"results": resultList, // Return the resultList as JSON
+	})
 }

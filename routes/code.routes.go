@@ -10,4 +10,5 @@ func CodeRoutes(a *fiber.App) {
 	route := a.Group("/api/code")
 
 	route.Post("/execute", controller.ExecuteCode)
+	route.Post("/RunCodeWithTestCase", controller.RunCodeWithTestCase)
 }
