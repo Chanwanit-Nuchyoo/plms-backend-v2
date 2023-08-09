@@ -2,13 +2,18 @@ package controller
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -163,14 +168,73 @@ func ExecuteCode(c *fiber.Ctx) error {
 		return handleError(c, err, fiber.StatusInternalServerError, "Failed to execute Python script")
 	}
 
-	return respondWithJSON(c, fiber.StatusOK, ResponseBody{
-		Status:  "success",
-		Message: "Code executed successfully",
-		Data:    string(output),
-	})
+	return c.SendString(string(output))
+
+	// return respondWithJSON(c, fiber.StatusOK, ResponseBody{
+	// 	Status:  "success",
+	// 	Message: "Code executed successfully",
+	// 	Data:    string(output),
+	// })
+}
+
+func getTestCase(exerciseID int) ([]AddTestData, error) {
+	var (
+		testData []AddTestData
+	)
+	var (
+		testcaseContent string
+		testcaseOutput  string
+	)
+
+	host := os.Getenv("DB_HOST")
+	portStr := os.Getenv("DB_PORT")
+	userdb := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
+
+	port, err := strconv.Atoi(portStr) // Convert port string to int
+	if err != nil {
+		log.Fatal("Error converting port to int:", err)
+	}
+
+	var connectString = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", userdb, password, host, port, dbName)
+	db, err := sql.Open("mysql", connectString)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf("SELECT testcase_content, testcase_output FROM exercise_testcase WHERE exercise_id = %d", exerciseID)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&testcaseContent, &testcaseOutput); err != nil {
+			log.Fatal(err)
+		}
+
+		// Append data to the testData slice
+		testData = append(testData, AddTestData{
+			inputs: testcaseContent,
+			result: testcaseOutput,
+		})
+	}
+
+	return testData, nil
 }
 
 func RunCodeWithTestCase(c *fiber.Ctx) error {
+	//get testdata from db
+	exerciseID := 1301449
+	testData, err := getTestCase(exerciseID)
+	if err != nil {
+		return handleError(c, err, fiber.StatusInternalServerError, "Failed to retrieve test data")
+	}
+
 	params := new(TestCasePayLoad)
 	if err := c.BodyParser(params); err != nil {
 		return handleError(c, err, fiber.StatusBadRequest, "Failed to parse request body")
@@ -185,14 +249,14 @@ func RunCodeWithTestCase(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(params.TimeLimit)*time.Second)
 	defer cancel()
 
-	testData := []AddTestData{
-		{"1 2 3 4 5 ",
-			" *** Sum even / Subtract odd ***\r\nEnter numbers : 1 2 3 4 5 \r\nSum is -3\n"},
-		{"4 6 3 5 8 ",
-			" *** Sum even / Subtract odd ***\r\nEnter numbers : 4 6 3 5 8 \r\nSum is 10\r\n"},
-		{"0 0 1 1 2 ",
-			" *** Sum even / Subtract odd ***\r\nEnter numbers : 0 0 1 1 2 \r\nSum is 0\r\n"},
-	}
+	// testData := []AddTestData{
+	// 	{"1 2 3 4 5 ",
+	// 		" *** Sum even / Subtract odd ***\r\nEnter numbers : 1 2 3 4 5 \r\nSum is -3\n"},
+	// 	{"4 6 3 5 8 ",
+	// 		" *** Sum even / Subtract odd ***\r\nEnter numbers : 4 6 3 5 8 \r\nSum is 10\r\n"},
+	// 	{"0 0 1 1 2 ",
+	// 		" *** Sum even / Subtract odd ***\r\nEnter numbers : 0 0 1 1 2 \r\nSum is 0\r\n"},
+	// }
 
 	var resultList []Result // Declare resultList as a local variable
 
