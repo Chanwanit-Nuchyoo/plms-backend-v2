@@ -151,7 +151,7 @@ func ExecuteCode(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "success",
 		"message": "Code executed successfully",
-		"data":    string(output),
+		"data":    standardizeLineBreaks(string(output)),
 	})
 }
 
